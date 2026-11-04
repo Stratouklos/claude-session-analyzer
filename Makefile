@@ -14,41 +14,56 @@ PY    ?= python3
 F     := findings
 T     := tools
 
-.PHONY: all extract corroborate judge reduce report status clean help
+.PHONY: all redact extract corroborate judge reduce report status test clean help FORCE
 
 all: $(F)/report.html
 
 help:
 	@echo "Targets:"
 	@echo "  all          run the full pipeline to findings/report.html"
+	@echo "  redact       write redacted copies of the allowlisted transcripts"
 	@echo "  extract      pull raw material out of the corpus"
 	@echo "  corroborate  check what the model wrote against what survived"
 	@echo "  judge        batch out for classification and merge verdicts back"
 	@echo "  reduce       collapse duplicates and lift the result into rules"
 	@echo "  report       build findings/report.html"
 	@echo "  status       report which outputs are stale (exits 1 if any)"
+	@echo "  test         run the test suite"
 	@echo "  clean        remove findings/"
 	@echo ""
 	@echo "Variables: MODEL=$(MODEL)  CHAT_EXPORT=$(CHAT_EXPORT)"
 
 # ---------------------------------------------------------------------------
+# Redact
+# ---------------------------------------------------------------------------
+
+# Always runs; the stamp changes only when a redacted copy did, so extract
+# reruns exactly when there is new material.
+$(F)/_meta/corpus.stamp: FORCE
+	$(PY) $(T)/redact_corpus.py
+
+redact: $(F)/_meta/corpus.stamp
+
+FORCE:
+
+# ---------------------------------------------------------------------------
 # Extract
 # ---------------------------------------------------------------------------
 
-$(F)/candidates_transcripts.jsonl:
+$(F)/candidates_transcripts.jsonl: $(F)/_meta/corpus.stamp
 	$(PY) $(T)/extract_transcripts.py
 
 $(F)/candidates_chat.jsonl:
 	@test -n "$(CHAT_EXPORT)" || { echo "set CHAT_EXPORT to your claude.ai export dir"; exit 1; }
 	$(PY) $(T)/extract_chat.py $(CHAT_EXPORT)
 
-$(F)/interrupts.jsonl:
+$(F)/interrupts.jsonl: $(F)/_meta/corpus.stamp
 	$(PY) $(T)/extract_interrupts.py
 
-$(F)/artifacts_authored.jsonl:
+$(F)/artifacts_authored.jsonl: $(F)/_meta/corpus.stamp
 	$(PY) $(T)/extract_artifacts.py
 
-$(F)/code_comments.jsonl:
+$(F)/code_comments.jsonl: $(F)/_meta/corpus.stamp
 	$(PY) $(T)/extract_code_comments.py
 
 extract: $(F)/candidates_transcripts.jsonl $(F)/interrupts.jsonl \
@@ -179,6 +194,9 @@ report: $(F)/report.html
 
 status:
 	$(PY) $(T)/status.py
+
+test:
+	$(PY) -m unittest discover -s tests -v
 
 clean:
 	rm -rf $(F)

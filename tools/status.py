@@ -20,11 +20,11 @@ from common import FINDINGS  # noqa: E402
 
 # output -> (inputs, the command that rebuilds it)
 STAGES = [
-    ("candidates_transcripts.jsonl", [], "extract_transcripts.py"),
+    ("candidates_transcripts.jsonl", ["_meta/corpus.stamp"], "extract_transcripts.py"),
     ("candidates_chat.jsonl", [], "extract_chat.py <export-dir>"),
-    ("interrupts.jsonl", [], "extract_interrupts.py"),
-    ("artifacts_authored.jsonl", [], "extract_artifacts.py"),
-    ("code_comments.jsonl", [], "extract_code_comments.py"),
+    ("interrupts.jsonl", ["_meta/corpus.stamp"], "extract_interrupts.py"),
+    ("artifacts_authored.jsonl", ["_meta/corpus.stamp"], "extract_artifacts.py"),
+    ("code_comments.jsonl", ["_meta/corpus.stamp"], "extract_code_comments.py"),
     ("git_landed.jsonl", ["artifacts_authored.jsonl"], "collect_git.py"),
     ("style_comparison.json", ["git_landed.jsonl"], "compare_style.py"),
     ("rewrites.jsonl", ["artifacts_authored.jsonl", "git_landed.jsonl", "prs.jsonl"], "match_rewrites.py"),

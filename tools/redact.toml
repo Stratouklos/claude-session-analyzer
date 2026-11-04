@@ -1,0 +1,27 @@
+title = "claude-session-analyzer redaction rules"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "private-key-truncated"
+description = "Private key block cut off before its END line"
+regex = '''-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----[A-Za-z0-9+/=\s\\n]{16,}'''
+keywords = ["private key"]
+
+[[rules]]
+id = "aws-access-key-id"
+description = "AWS access key id on its own, without the secret key the default rule pairs it with"
+regex = '''\b(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}\b'''
+keywords = ["a3t", "akia", "asia", "abia", "acca"]
+
+[[rules]]
+id = "aws-secret-access-key-named"
+description = "AWS secret access key after its usual name; the default composite rule reports only the key id"
+regex = '''(?i)aws[_-]?secret[_-]?access[_-]?key["']?\s*[:=]\s*["']?([A-Za-z0-9/+=]{40})'''
+secretGroup = 1
+keywords = ["secret_access_key", "secret-access-key", "secretaccesskey"]
+
+[[allowlists]]
+description = "The placeholder this tool writes in place of a secret"
+regexes = ['''^\[REDACTED:[a-z0-9-]+\](?:\\[nrt"]|[\s"',;`).-])*$''']

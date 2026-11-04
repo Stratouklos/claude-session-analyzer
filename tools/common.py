@@ -5,6 +5,10 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import redact  # noqa: E402
+
 HOME = os.path.expanduser("~")
 PROJECTS = os.path.join(HOME, ".claude", "projects")
 
@@ -85,6 +89,7 @@ CONFIG_DEFAULTS = {
     "pr_repos": None,        # collect_prs: repos to sweep, "owner/name"
     "pr_author": None,       # collect_prs: GitHub login to filter on
     "window_start": None,    # collect_git, collect_prs: ISO date lower bound
+    "included_project_substrings": None,  # every transcript reader: projects to read
     # Optional; empty means no filtering.
     "extra_roots": [],
     "excluded_sessions": [],
@@ -221,7 +226,7 @@ def derive_project_label_strip():
 
 def _transcript_cwds():
     cwds = set()
-    for _project, path in iter_transcripts():
+    for _project, path in iter_raw_transcripts(allowlisted=False):
         for entry in read_jsonl(path):
             if entry.get("cwd"):
                 cwds.add(entry["cwd"])
@@ -233,7 +238,7 @@ def derive_window_start():
     """Earliest timestamp actually present in the corpus. Entries are written in
     order, so the first one carrying a timestamp dates the session."""
     earliest = None
-    for _project, path in iter_transcripts():
+    for _project, path in iter_raw_transcripts(allowlisted=False):
         for entry in read_jsonl(path):
             stamp = entry.get("timestamp")
             if stamp:
@@ -297,6 +302,9 @@ def interactive_setup():
         "pr_repos - repos to sweep for PRs, owner/name", repos)
     cfg["window_start"] = _ask(
         "window_start - ignore commits and PRs before this date", window or "")
+    cfg["included_project_substrings"] = _ask(
+        "included_project_substrings - read only projects whose transcript dir"
+        " contains one of these, e.g. -Code-my-repo", [])
     cfg["excluded_sessions"] = _ask(
         "excluded_sessions - session ids to leave out entirely, e.g. the session"
         " that designed the sweep", [])
@@ -477,12 +485,71 @@ def corpus_roots():
     return roots
 
 
+REDACTED_DIR = os.path.join(FINDINGS, "redacted")
+# Text holding this was rewritten by redaction, so it cannot be compared with git or disk.
+REDACTED_MARK = "[REDACTED:"
+
+
 def iter_transcripts():
+    """Yield (project_dir, path) for every redacted session transcript.
+
+    Analysis tools never read the raw corpus: tools/redact_corpus.py writes a
+    redacted copy of each allowlisted session first, and this lists those
+    copies. Only first-run setup reads raw sessions, for their cwd and date.
+    """
+    for row in redacted_manifest()["files"]:
+        yield row["project"], os.path.join(REDACTED_DIR, row["copy"])
+
+
+def redacted_manifest():
+    path = os.path.join(REDACTED_DIR, "manifest.json")
+    if not os.path.exists(path):
+        raise SystemExit(
+            f"ERROR: no redacted corpus at {REDACTED_DIR}.\n"
+            "  Fix: python3 tools/redact_corpus.py (make runs it first)."
+        )
+    with open(path) as fh:
+        manifest = json.load(fh)
+    if manifest.get("config") != corpus_config() or manifest.get("rules") != redact.rules_digest():
+        raise SystemExit(
+            "ERROR: the redacted corpus was built under a different config or rules.\n"
+            "  Fix: python3 tools/redact_corpus.py (make runs it first)."
+        )
+    return manifest
+
+
+def allowlist():
+    """The project allowlist. Every transcript dir name starts with '-', so an
+    entry of only dashes, or a bare string split into characters, would match
+    every project: refuse both."""
+    value = config_required("included_project_substrings")
+    if not isinstance(value, list) or not all(isinstance(s, str) and s.strip("-") for s in value):
+        raise SystemExit(
+            "ERROR: 'included_project_substrings' must be a list of transcript-dir"
+            f" substrings, each with more than dashes. Got: {value!r}"
+        )
+    return tuple(value)
+
+
+def corpus_config():
+    """The settings that decide which sessions are in the redacted corpus."""
+    return {
+        "included_project_substrings": list(allowlist()),
+        "excluded_project_substrings": sorted(EXCLUDED_PROJECT_SUBSTRINGS),
+        "excluded_sessions": sorted(EXCLUDED_SESSIONS),
+        "extra_roots": CONFIG["extra_roots"],
+        "extra_roots_env": os.environ.get("CSA_EXTRA_ROOTS", ""),
+    }
+
+
+def iter_raw_transcripts(allowlisted=True):
     """Yield (project_dir, path) for every top-level session transcript.
 
     Sessions are deduped by filename across machines: transcript names are UUIDs,
     so a repeat means the same session was collected twice, not two sessions.
+    Only redact_corpus.py and first-run setup read these.
     """
+    allow = allowlist() if allowlisted else ()
     seen = set()
     for label, base in corpus_roots():
         for root, _dirs, files in os.walk(base):
@@ -495,6 +562,8 @@ def iter_transcripts():
                 path = os.path.join(root, name)
                 rel = os.path.relpath(path, base)
                 project = rel.split(os.sep)[0]
+                if allowlisted and not any(s in project for s in allow):
+                    continue
                 if any(s in project for s in EXCLUDED_PROJECT_SUBSTRINGS):
                     continue
                 if any(s in name for s in EXCLUDED_SESSIONS):

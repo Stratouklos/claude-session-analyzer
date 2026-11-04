@@ -30,7 +30,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from common import FINDINGS, ensure_findings_dir, write_jsonl  # noqa: E402
+from common import FINDINGS, REDACTED_MARK, ensure_findings_dir, write_jsonl  # noqa: E402
 
 SAME_GROUND = 0.45  # normalized similarity that means "about the same thing"
 MATERIALLY_SHORTER = 0.75  # later block is this fraction of the earlier or less
@@ -147,6 +147,8 @@ def main():
     missing_files = 0
     file_cache = {}
     for r in rows:
+        if REDACTED_MARK in r["comment"]:
+            continue
         path = r["file"]
         if path not in file_cache:
             file_cache[path] = comment_blocks_in_file(path, None)

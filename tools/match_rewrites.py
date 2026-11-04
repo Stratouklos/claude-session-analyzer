@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from common import (  # noqa: E402
     FINDINGS,
+    REDACTED_MARK,
     ensure_findings_dir,
     strip_trailers,
     write_jsonl,
@@ -54,6 +55,8 @@ def split_subject(body):
 def match_commits(authored, landed):
     rows = []
     for art in authored:
+        if REDACTED_MARK in art["body"]:
+            continue
         subject, body = split_subject(art["body"])
         if not subject:
             continue
@@ -94,6 +97,8 @@ def match_commits(authored, landed):
 def match_prs(authored, prs):
     rows = []
     for art in authored:
+        if REDACTED_MARK in art["body"]:
+            continue
         subject, body = split_subject(art["body"])
         probe = art["body"]
         best = None

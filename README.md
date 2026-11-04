@@ -11,8 +11,10 @@ committed.
 
 ## Setup
 
-Python 3, standard library only. Nothing to install. `collect_prs.py` needs the
-[`gh`](https://cli.github.com) CLI authenticated.
+Python 3, standard library only, plus
+[betterleaks](https://github.com/betterleaks/betterleaks) on `PATH`
+(`brew install betterleaks`, or set `CSA_BETTERLEAKS`). `collect_prs.py` needs
+the [`gh`](https://cli.github.com) CLI authenticated.
 
 Run any tool with no config on a terminal and it will offer to build one,
 deriving what it can and asking you to confirm: your commit emails from `git
@@ -37,6 +39,7 @@ Checked in order, first hit wins. The resolved path is printed on every run.
 
 | Key | Used by |
 | --- | --- |
+| `included_project_substrings` | every transcript reader — only projects whose transcript dir contains one of these are read. Required |
 | `author_emails` | `compare_style` — which commits you hand-wrote |
 | `pr_repos`, `pr_author` | `collect_prs` |
 | `window_start` | `collect_git`, `collect_prs` |
@@ -90,6 +93,34 @@ model read a batch of JSON from `findings/*_in/` and expect the verdicts back in
 `findings/*_out/` — the judging itself is done by whatever model you point at
 those batches, not by this repo.
 
+**Redact** — before anything reads a transcript.
+
+| Tool | Writes |
+| --- | --- |
+| `redact_corpus.py` | `redacted/<project>/<session>.jsonl`, `redacted/manifest.json`, `_meta/corpus.stamp` |
+| `redact.py --self-test` | nothing; run by `redact_corpus.py` every time |
+
+Transcripts hold whatever a tool printed, keys and tokens included. Every later
+stage clips text, and a clipped secret matches no rule, so `redact_corpus.py`
+scans each allowlisted session whole with betterleaks (decoded string values,
+each with its key) and writes a copy with every finding replaced by
+`[REDACTED:<rule>]`. Dict keys are scanned and replaced too. An entry whose
+finding has no literal to replace (found after base64 decoding) is dropped.
+Readers stop if the corpus was built under a different allowlist or rules. Every reader lists these copies, never the
+raw corpus (first-run setup is the one exception: it reads each raw session's
+cwd and first date to suggest config values). A copy is rebuilt only when its
+session, the rules or the redaction code changed, and
+the stamp moves only when a copy did, so `make` re-extracts only when there is
+something new. Rules: `tools/redact.toml` (the betterleaks defaults plus a few
+for shapes they miss). Validation is off, so no secret is sent anywhere to be
+checked.
+
+`judge_batches.py` scans every batch again before the first model call and
+stops the run, with nothing sent, on any finding. It caches verdicts by model,
+rubric and item content, so a re-run sends only items the model has not seen.
+An item whose verdict comes back with a missing or invented id is asked once
+more, then left out (and asked again next run), never paired by position.
+
 **Extract** — pull raw material out of the corpus.
 
 | Tool | Writes |
@@ -114,7 +145,7 @@ those batches, not by this repo.
 
 | Tool | Writes |
 | --- | --- |
-| `make_triage_batches.py [size] [--new-only]` | `triage_in/batch_NNN.json` |
+| `make_triage_batches.py [size]` | `triage_in/batch_NNN.json` |
 | `merge_triage.py [--min-confidence N]` | `triaged.jsonl`, `judge_in/` |
 | `make_comment_batches.py [size]` | `comment_in/batch_NNN.json` |
 | `summarize_comments.py` | `comment_summary.json` |
@@ -247,6 +278,9 @@ first offences.
 
 ## Caveats worth knowing
 
+- Redaction is rule-based. A secret in a format no rule knows (an in-house
+  token, a bespoke connection string) passes through. Add a rule to
+  `tools/redact.toml` and a case to the self-test in `tools/redact.py`.
 - The patterns above are finders, not measurements. Precision was hand-checked
   once at 47% on one corpus, which is why every hit goes to review.
 - Everything derived from complaints undercounts failures you absorbed silently.

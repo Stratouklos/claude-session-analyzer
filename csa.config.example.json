@@ -6,6 +6,8 @@
   "pr_author": "your-github-login",
   "window_start": "2026-07-08",
 
+  "included_project_substrings": ["-Code-service-a", "-Code-service-b"],
+
   "extra_roots": [
     {"label": "laptop", "path": "~/corpora/claude-sessions-laptop"}
   ],
