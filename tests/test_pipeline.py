@@ -349,6 +349,27 @@ class Pipeline(unittest.TestCase):
         self.assertIn("CHAT_EXPORT", proc.stdout + proc.stderr)
         self.assertFalse(os.path.exists(os.path.join(self.findings, "_meta", "export.stamp")))
 
+    def test_make_clean_keeps_gold_but_clean_all_removes_it(self):
+        gold = os.path.join(self.findings, "gold")
+        os.makedirs(gold, exist_ok=True)
+        label = os.path.join(gold, "gold.jsonl")
+        with open(label, "w") as fh:
+            fh.write('{"id": "s:1", "labeled": true}\n')
+        other = os.path.join(self.findings, "candidates_chat.jsonl")
+        with open(other, "w") as fh:
+            fh.write("{}\n")
+        env = dict(os.environ, HOME=self.home, CSA_CONFIG=self.config, CSA_FINDINGS=self.findings)
+        run = lambda target: subprocess.run(
+            ["make", f"F={self.findings}", target], cwd=REPO, env=env,
+            capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        r = run("clean")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(os.path.exists(label), "clean keeps the hand-labeled gold set")
+        self.assertFalse(os.path.exists(other), "clean removes rebuildable outputs")
+        r = run("clean-all")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(label), "clean-all removes the gold set too")
+
     def test_raw_fixture_holds_a_detectable_secret(self):
         _sid, raw = self.add_session(WORK)
         with open(raw) as fh:

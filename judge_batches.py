@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive a judging pass through an Ollama model (local or :cloud).
+"""Drive a judging pass through an Ollama model or the claude CLI.
 
 Reads every batch in <input_dir>, sends it to the model with <rubric_file> as
 instructions, and writes the parsed verdicts to <output_dir>. Generic across the
@@ -8,7 +8,8 @@ triage and judge passes; the rubric defines the output shape.
 Verdicts are cached by content (model, rubric, item), so a re-run sends only
 items the model has not judged, whatever batch they land in. Every batch is
 scanned for secrets before the first call; one finding stops the run with
-nothing sent.
+nothing sent. <model> is `ollama:<name>`, `claude:<alias>` or a bare Ollama name;
+a `:cloud` Ollama model is refused unless ALLOW_CLOUD=1.
 
 Usage:
   python3 judge_batches.py <model> <input_dir> <output_dir> <rubric_file> [--limit N]
@@ -23,24 +24,15 @@ import os
 import re
 import sys
 import time
-import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
 
+import judge_backends  # noqa: E402
 import redact  # noqa: E402
-
-OLLAMA = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
 
 def generate(model, prompt, timeout=900):
-    payload = {"model": model, "prompt": prompt, "stream": False}
-    req = urllib.request.Request(
-        f"{OLLAMA}/api/generate",
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read()).get("response", "")
+    return judge_backends.generate(model, prompt, timeout)
 
 
 def extract_json(text):
@@ -199,6 +191,7 @@ def main():
         print(__doc__)
         sys.exit(2)
     model, in_dir, out_dir, rubric_path = args[:4]
+    judge_backends.guard_cloud(model)
     limit = None
     if "--limit" in sys.argv:
         limit = int(sys.argv[sys.argv.index("--limit") + 1])

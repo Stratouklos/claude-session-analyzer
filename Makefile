@@ -2,19 +2,22 @@
 #
 # `make` (or `make all`) runs the full pipeline to findings/report.html.
 # Stages that need a model read batches from findings/*_in/ and expect verdicts
-# back in findings/*_out/; judge_batches.py drives that pass through Ollama.
+# back in findings/*_out/; judge_batches.py drives that pass through Ollama or `claude -p`.
 #
 # Variables:
-#   MODEL        Ollama model used for the judging passes (default minimax-m3:cloud)
+#   MODEL        model for the judging passes: name, ollama:<name> or claude:<alias>
+#                (default minimax-m3:cloud; a :cloud model needs ALLOW_CLOUD=1)
+#   MODELS       space-separated models for `make bakeoff` (no default)
 #   CHAT_EXPORT  path to an unzipped claude.ai export, if you have one (optional)
 #   PY           python3
 
 MODEL ?= minimax-m3:cloud
+MODELS ?=
 PY    ?= python3
 F     := findings
 T     := tools
 
-.PHONY: all redact extract corroborate judge reduce report status test clean help FORCE
+.PHONY: all redact extract corroborate judge reduce report status test gold bakeoff clean clean-all help FORCE
 
 all: $(F)/report.html
 
@@ -28,8 +31,11 @@ help:
 	@echo "  reduce       collapse duplicates and lift the result into rules"
 	@echo "  report       build findings/report.html"
 	@echo "  status       report which outputs are stale (exits 1 if any)"
+	@echo "  gold         sample a gold set to hand label (never overwrites your edits)"
+	@echo "  bakeoff      score MODELS against the gold set (no winner, no config)"
 	@echo "  test         run the test suite"
-	@echo "  clean        remove findings/"
+	@echo "  clean        remove findings/ but keep your hand-labeled gold set"
+	@echo "  clean-all    remove findings/ including the gold set"
 	@echo ""
 	@echo "Variables: MODEL=$(MODEL)  CHAT_EXPORT=$(CHAT_EXPORT)"
 
@@ -200,8 +206,18 @@ report: $(F)/report.html
 status:
 	$(PY) $(T)/status.py
 
+gold:
+	$(PY) $(T)/make_gold_set.py
+
+bakeoff:
+	$(PY) $(T)/bakeoff.py $(MODELS)
+
 test:
 	$(PY) -m unittest discover -s tests -v
 
 clean:
+	@# keep findings/gold: hand-corrected labels no run can rebuild. clean-all wipes it too.
+	@if [ -d $(F)/gold ]; then find $(F) -mindepth 1 -maxdepth 1 ! -name gold -exec rm -rf {} +; else rm -rf $(F); fi
+
+clean-all:
 	rm -rf $(F)

@@ -61,7 +61,7 @@ checked.
 `make` (or `make all`) runs the whole pipeline to `findings/report.html`. Each
 stage is a file target carrying its real dependencies, so only stale outputs
 rebuild. The model passes read batches from `findings/*_in/` and expect verdicts
-back in `findings/*_out/`, driven by `judge_batches.py` through Ollama.
+back in `findings/*_out/`, driven by `judge_batches.py` through Ollama or `claude -p`.
 
 ```sh
 make            # full pipeline to findings/report.html
@@ -70,10 +70,13 @@ make clean      # remove findings/
 ```
 
 The judging passes need a model. `MODEL` overrides it (default
-`minimax-m3:cloud`):
+`minimax-m3:cloud`). It is an Ollama name, `ollama:<name>`, or
+`claude:<alias>` (runs `claude -p`, needs claude 2.1.248 or newer). A `:cloud`
+Ollama model is refused unless `ALLOW_CLOUD=1`:
 
 ```sh
 make MODEL=some-other-model
+make MODEL=claude:haiku
 ```
 
 If you have a claude.ai export, point `CHAT_EXPORT` at the unzipped directory to
@@ -85,6 +88,14 @@ make CHAT_EXPORT=/path/to/export
 
 To run one stage at a time: `make extract`, `make corroborate`, `make judge`,
 `make reduce`, `make report`.
+
+## Backends and privacy
+
+- `ollama:` cloud models (a `:cloud` or `-cloud` tag) are refused unless `ALLOW_CLOUD=1`.
+- `claude:` sends the redacted batches to Anthropic. Choosing it is the opt-in to upload.
+- `OLLAMA_HOST` can point off-machine; check it before a run.
+- `claude -p` runs with `--setting-sources project`. Check how your project hooks behave before a real run.
+- `make clean` keeps `findings/gold/` (redacted conversation text at rest). `make clean-all` removes it too.
 
 ## How it works
 
