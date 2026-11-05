@@ -1,7 +1,7 @@
 """Compare candidate judge models against the hand-labeled gold set.
 
 For each model, runs the triage rubric over the gold windows, then the verify
-rubric over the rows the model kept (is_correction with confidence >= 0.3), by
+rubric over the rows the model kept (truthy is_correction with confidence >= the production cutoff), by
 running judge_batches.py, so the secret gate and model backends are unchanged.
 Reports triage agreement, draft precision, verify agreement and wall time.
 Every number is PROVISIONAL until all gold rows are marked labeled. It names no
@@ -23,15 +23,12 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from common import FINDINGS, is_user_turn  # noqa: E402
+from common import FINDINGS, JUDGE_BATCH, TRIAGE_BATCH, is_user_turn, kept  # noqa: E402
 from make_triage_batches import compact  # noqa: E402
 import redact  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(REPO, "tools")
-MIN_CONF = 0.3
-TRIAGE_BATCH = 20
-VERIFY_BATCH = 5
 
 
 def load_gold():
@@ -77,10 +74,11 @@ def run_pass(model, work, name, items, size, rubric):
     return verdicts
 
 
-def kept(v):
+def verdict_kept(v):
+    """Production's `kept`, but a malformed model verdict (bad confidence) counts as not kept."""
     try:
-        return v.get("is_correction") is True and float(v.get("confidence") or 0) >= MIN_CONF
-    except (TypeError, ValueError):
+        return kept(v)
+    except (TypeError, ValueError, AttributeError):
         return False
 
 
@@ -92,7 +90,7 @@ def score(gold, triage, verify):
     """A row with no model verdict counts against the model; a row with no gold label is left out."""
     lab = [g for g in gold if isinstance(g["label"].get("is_correction"), bool)]
     agree = sum(1 for g in lab if triage.get(g["id"], {}).get("is_correction") is g["label"]["is_correction"])
-    drafted = [g for g in lab if kept(triage.get(g["id"], {}))]
+    drafted = [g for g in lab if verdict_kept(triage.get(g["id"], {}))]
     precise = sum(1 for g in drafted if g["label"]["is_correction"])
     vlab = [g for g in gold if isinstance(g["label"].get("confirmed"), bool) and g["id"] in verify]
     vagree = sum(1 for g in vlab if verify[g["id"]].get("confirmed") is g["label"]["confirmed"])
@@ -112,8 +110,8 @@ def run_model(model, gold):
                           "triage_rubric.md")
         keep = [{**{k: v for k, v in g.items() if k not in ("label", "labeled", "triage_prefill")},
                  "triage": triage[g["id"]]}
-                for g in gold if kept(triage.get(g["id"], {}))]
-        verify = run_pass(model, work, "verify", keep, VERIFY_BATCH, "judge_rubric.md") if keep else {}
+                for g in gold if verdict_kept(triage.get(g["id"], {}))]
+        verify = run_pass(model, work, "verify", keep, JUDGE_BATCH, "judge_rubric.md") if keep else {}
         row.update(score(gold, triage, verify))
     except Exception as e:  # noqa: BLE001
         row.update(status="failed", error=str(e))

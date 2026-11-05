@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from common import (  # noqa: E402
     FINDINGS,
+    TRIAGE_BATCH,
     ensure_findings_dir,
     is_user_turn,
     positional_args,
@@ -72,7 +73,7 @@ def compact(cand):
 
 def main():
     args = positional_args()
-    batch_size = int(args[0]) if args else 60
+    batch_size = int(args[0]) if args else TRIAGE_BATCH
     ensure_findings_dir()
     out_dir = os.path.join(FINDINGS, "triage_in")
     os.makedirs(out_dir, exist_ok=True)

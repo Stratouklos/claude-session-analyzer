@@ -289,6 +289,18 @@ class Bakeoff(Backends):
         self.assertNotIn("best", text)
         self.assertEqual(self.snapshot(), before, "nothing is written under findings/")
 
+    def test_scoring_uses_the_production_keep_predicate(self):
+        import bakeoff
+        gold = [{"id": f"g:{i}", "label": {"is_correction": True, "confirmed": None}} for i in range(5)]
+        triage = {
+            "g:0": {"is_correction": 1, "confidence": 0.3},        # truthy and at the cutoff: kept
+            "g:1": {"is_correction": True, "confidence": 0.29},    # below the cutoff
+            "g:2": {"is_correction": True, "confidence": "high"},  # malformed: counts as not kept
+            "g:3": {"is_correction": True, "confidence": None},    # no confidence is 0
+        }                                                          # g:4 has no verdict
+        score = bakeoff.score(gold, triage, {})
+        self.assertEqual(score["draft_precision"], {"value": 1.0, "n": 1})
+
     def test_fully_labeled_gold_is_not_provisional(self):
         self.gold_file(labeled=True)
         report = parse_report(self.bakeoff("ollama:stub").stdout)

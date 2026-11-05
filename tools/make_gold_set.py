@@ -26,7 +26,6 @@ import redact  # noqa: E402
 
 DEFAULT_N = 40
 DEFAULT_SEED = 20260101
-MIN_CONF = 0.3
 LOW_BAND = 0.5
 
 

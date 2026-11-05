@@ -21,9 +21,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from common import FINDINGS, ensure_findings_dir, write_jsonl  # noqa: E402
-
-JUDGE_BATCH = 25
+from common import FINDINGS, JUDGE_BATCH, MIN_CONF, ensure_findings_dir, kept, write_jsonl  # noqa: E402
 
 
 def load_candidates():
@@ -78,7 +76,7 @@ def severity(cand, verdict):
 
 def main():
     ensure_findings_dir()
-    min_conf = 0.3
+    min_conf = MIN_CONF
     if "--min-confidence" in sys.argv:
         min_conf = float(sys.argv[sys.argv.index("--min-confidence") + 1])
 
@@ -131,12 +129,7 @@ def main():
         print(f"WARNING: {len(ghost_ids)} fabricated ids dropped: {ghost_ids[:6]}")
 
     coverage = len(seen_ids) / max(1, len(cands))
-    keep = [
-        m
-        for m in merged
-        if m["triage"].get("is_correction")
-        and float(m["triage"].get("confidence") or 0) >= min_conf
-    ]
+    keep = [m for m in merged if kept(m["triage"], min_conf)]
     keep.sort(key=lambda m: -m["severity"])
 
     write_jsonl(os.path.join(FINDINGS, "triaged.jsonl"), merged)

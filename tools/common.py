@@ -12,6 +12,16 @@ import redact  # noqa: E402
 HOME = os.path.expanduser("~")
 PROJECTS = os.path.join(HOME, ".claude", "projects")
 
+# One pipeline definition: `make judge` and the bakeoff must share these, or the bakeoff measures another pipeline.
+MIN_CONF = 0.3
+TRIAGE_BATCH = 60
+JUDGE_BATCH = 25
+
+
+def kept(triage, min_conf=MIN_CONF):
+    """The production keep predicate: a truthy is_correction at or above min_conf."""
+    return bool(triage.get("is_correction")) and float(triage.get("confidence") or 0) >= min_conf
+
 
 def _flag_arg(*flags):
     """Value of the first of `flags` present in argv, honoured by every tool."""

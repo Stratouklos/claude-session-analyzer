@@ -414,6 +414,41 @@ class Pipeline(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("included_project_substrings", proc.stdout + proc.stderr)
 
+    def merge_kept(self, verdicts, *flags):
+        """Run merge_triage over hand-written verdicts; return (kept ids, judge_in batch sizes)."""
+        os.makedirs(self.findings, exist_ok=True)
+        with open(os.path.join(self.findings, "candidates_transcripts.jsonl"), "w") as fh:
+            fh.write("".join(json.dumps({"id": v["id"], "window": []}) + "\n" for v in verdicts))
+        os.makedirs(os.path.join(self.findings, "triage_out"))
+        with open(os.path.join(self.findings, "triage_out", "batch_000.json"), "w") as fh:
+            json.dump(verdicts, fh)
+        self.run_tool("tools/merge_triage.py", *flags)
+        judge_in = os.path.join(self.findings, "judge_in")
+        batches = [json.loads(read(os.path.join(judge_in, n))) for n in sorted(os.listdir(judge_in))]
+        return {m["id"] for b in batches for m in b}, [len(b) for b in batches]
+
+    def test_merge_triage_keep_rule_and_batching_are_unchanged(self):
+        # is_correction is truthiness, the cutoff is inclusive, and judge_in is sliced at 25.
+        verdicts = [
+            {"id": "t:truthy_int", "is_correction": 1, "confidence": 0.9},
+            {"id": "t:truthy_str", "is_correction": "yes", "confidence": 0.9},
+            {"id": "t:at_cutoff", "is_correction": True, "confidence": 0.3},
+            {"id": "t:below", "is_correction": True, "confidence": 0.29},
+            {"id": "t:mid", "is_correction": True, "confidence": 0.4},
+            {"id": "t:no_conf", "is_correction": True},
+            {"id": "t:false", "is_correction": False, "confidence": 0.99},
+        ]
+        ids, _ = self.merge_kept(verdicts)
+        self.assertEqual(ids, {"t:truthy_int", "t:truthy_str", "t:at_cutoff", "t:mid"})
+        shutil.rmtree(os.path.join(self.findings, "triage_out"))
+        ids, _ = self.merge_kept(verdicts, "--min-confidence", "0.5")
+        self.assertEqual(ids, {"t:truthy_int", "t:truthy_str"})
+
+    def test_merge_triage_slices_judge_in_at_25(self):
+        verdicts = [{"id": f"t:{i:03d}", "is_correction": True, "confidence": 0.9} for i in range(51)]
+        _, sizes = self.merge_kept(verdicts)
+        self.assertEqual(sizes, [25, 25, 1])
+
     def test_second_run_judges_only_new_sessions(self):
         self.add_session(WORK)
         self.run_tool("tools/redact_corpus.py")
