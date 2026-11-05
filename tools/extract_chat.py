@@ -13,6 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import redact  # noqa: E402
 from common import (  # noqa: E402
     CORRECTION_PHRASE,
     NEGATION_LEAD,
@@ -68,6 +69,12 @@ def main():
 
     for conv in convs:
         msgs = conv.get("chat_messages") or []
+        if not msgs:
+            continue
+        # Redact whole messages and the title before any clip: a cut secret matches no rule.
+        msgs, _ = redact.redact_until_clean(msgs)
+        named, _ = redact.redact_until_clean([{"name": conv.get("name")}])
+        conv = {**conv, "name": named[0]["name"] if named else None}
         if not msgs:
             continue
         stats["conversations"] += 1

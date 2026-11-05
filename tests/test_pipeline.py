@@ -162,6 +162,103 @@ class Pipeline(unittest.TestCase):
                     chunks.append(fh.read())
         return "\n".join(chunks)
 
+    def add_chat_export(self, text):
+        """An unzipped claude.ai export with one conversation: a long reply, then `text`."""
+        export = os.path.join(self.tmp, "export")
+        os.makedirs(export)
+        msgs = [
+            {"uuid": uuid.uuid4().hex, "sender": "human", "created_at": "2026-11-01T10:00:00Z",
+             "text": "deploy the api to staging"},
+            {"uuid": uuid.uuid4().hex, "sender": "assistant", "created_at": "2026-11-01T10:00:05Z",
+             "text": "Deploying now. " + "Checking the rollout. " * 120},
+            {"uuid": uuid.uuid4().hex, "sender": "human", "created_at": "2026-11-01T10:01:00Z",
+             "text": text},
+        ]
+        conv = {"uuid": uuid.uuid4().hex, "name": "deploy chat", "chat_messages": msgs}
+        with open(os.path.join(export, "conversations.json"), "w") as fh:
+            json.dump([conv], fh)
+        return export
+
+    def test_chat_export_is_redacted_before_it_is_extracted(self):
+        export = self.add_chat_export(f"no, that's wrong, use token {self.secret} instead")
+        self.run_tool("tools/extract_chat.py", export)
+        with open(os.path.join(self.findings, "candidates_chat.jsonl")) as fh:
+            self.assertTrue(fh.read().strip(), "the correction must be extracted")
+        text = self.all_findings_text()
+        self.assertNotIn(self.secret, text)
+        self.assertNotIn(self.secret[:20], text)
+        self.assertIn("[REDACTED:", text)
+
+    def test_chat_token_at_the_clip_boundary_never_reaches_the_model(self):
+        # The judge clips the prompt at 1400, ahead of the 1800 extract clip: straddle the one that bites.
+        pad = "no, that's wrong, " + "x" * (1400 - 10 - len("no, that's wrong, "))
+        export = self.add_chat_export(f"{pad}{self.secret} and more")
+        self.run_tool("tools/extract_chat.py", export)
+        self.judge_triage()
+        self.assertTrue(StubModel.seen, "the candidate must be judged")
+        sent = json.dumps(StubModel.payloads)
+        for n in (8, 20, len(self.secret)):
+            self.assertNotIn(self.secret[:n], sent)
+        self.assertNotIn(self.secret, self.all_findings_text())
+
+    def write_export(self, msgs, name="deploy chat"):
+        """An unzipped export with one conversation of (sender, text) messages."""
+        export = os.path.join(self.tmp, "export")
+        os.makedirs(export, exist_ok=True)
+        chat = [{"uuid": uuid.uuid4().hex, "sender": who, "created_at": f"2026-11-01T10:0{i}:00Z", "text": text}
+                for i, (who, text) in enumerate(msgs)]
+        with open(os.path.join(export, "conversations.json"), "w") as fh:
+            json.dump([{"uuid": uuid.uuid4().hex, "name": name, "chat_messages": chat}], fh)
+        return export
+
+    def chat_candidates(self):
+        with open(os.path.join(self.findings, "candidates_chat.jsonl")) as fh:
+            return [json.loads(line) for line in fh]
+
+    def test_chat_secret_in_assistant_reply_and_title_is_redacted(self):
+        export = self.write_export(
+            [("human", "deploy the api"),
+             ("assistant", f"Use token {self.secret} to deploy."),
+             ("human", "no, that's wrong, use the staging cluster instead")],
+            name=f"deploy with {self.secret}")
+        self.run_tool("tools/extract_chat.py", export)
+        found = self.chat_candidates()
+        self.assertEqual(len(found), 1)
+        self.assertNotIn(self.secret[:20], self.all_findings_text())
+        self.assertIn("[REDACTED:", found[0]["window"][1]["text"])
+        self.assertIn("[REDACTED:", found[0]["conversation"])
+
+    def test_chat_message_dropped_by_redaction_keeps_turns_coherent(self):
+        pem = redact.canaries()["pem_base64"]
+        export = self.write_export(
+            [("human", "deploy the api"),
+             ("assistant", f"here is the key {pem}"),
+             ("human", "no, that's wrong, use the staging cluster instead"),
+             ("assistant", "Understood.")])
+        self.run_tool("tools/extract_chat.py", export)
+        self.assertNotIn(pem[:40], self.all_findings_text())
+        found = self.chat_candidates()
+        self.assertEqual(len(found), 1)
+        cand = found[0]
+        self.assertEqual(cand["prompt"], "no, that's wrong, use the staging cluster instead")
+        self.assertEqual(len(cand["window"]), 3, "the dropped reply leaves three turns")
+        self.assertEqual(cand["window"][cand["turn"]]["text"], cand["prompt"])
+        self.assertEqual(cand["preceding_output_chars"], 0)
+        self.assertEqual(cand["turns_before_next_prompt"], None)
+
+    def test_clean_chat_is_left_unchanged(self):
+        reply = "Deploying now. " + "Checking the rollout. " * 20
+        correction = "no, that's wrong, use the staging cluster instead"
+        export = self.write_export([("human", "deploy the api"), ("assistant", reply), ("human", correction)],
+                                   name="deploy chat")
+        self.run_tool("tools/extract_chat.py", export)
+        cand = self.chat_candidates()[0]
+        self.assertEqual(cand["prompt"], correction)
+        self.assertEqual(cand["conversation"], "deploy chat")
+        self.assertEqual(cand["window"][1]["text"], reply)
+        self.assertEqual(cand["preceding_output_chars"], len(reply))
+        self.assertNotIn("[REDACTED", self.all_findings_text())
+
     def test_raw_fixture_holds_a_detectable_secret(self):
         _sid, raw = self.add_session(WORK)
         with open(raw) as fh:

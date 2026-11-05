@@ -154,6 +154,20 @@ def _replace(value, ordered, literals):
     return value
 
 
+def redact_until_clean(entries):
+    """Run `redact_entries` until a scan finds nothing; what survives ROUNDS is dropped."""
+    # A replacement can expose a new match, so repeat until clean.
+    totals = {"findings": 0, "replaced": 0, "dropped_entries": 0}
+    redacted = entries
+    for round_ in range(ROUNDS + 1):
+        redacted, stats = redact_entries(redacted, drop_all=round_ == ROUNDS)
+        for k in totals:
+            totals[k] += stats[k]
+        if not stats["findings"]:
+            break
+    return redacted, totals
+
+
 def redact_jsonl_file(src, dst):
     """Write a redacted copy of the JSONL transcript `src` to `dst` (mode 0600)."""
     entries, unparseable = [], 0
@@ -165,16 +179,7 @@ def redact_jsonl_file(src, dst):
                 entries.append(json.loads(line))
             except ValueError:
                 unparseable += 1
-    # A replacement can expose a new match, so repeat until clean; what survives is dropped.
-    totals = {"findings": 0, "replaced": 0, "dropped_entries": 0}
-    redacted = entries
-    for round_ in range(ROUNDS + 1):
-        redacted, stats = redact_entries(redacted, drop_all=round_ == ROUNDS)
-        for k in totals:
-            totals[k] += stats[k]
-        if not stats["findings"]:
-            break
-    stats = totals
+    redacted, stats = redact_until_clean(entries)
     # ensure_ascii keeps a lone surrogate (text cut mid-emoji) writable as an escape.
     write_private(dst, "".join(json.dumps(entry) + "\n" for entry in redacted))
     stats["unparseable_lines"] = unparseable
