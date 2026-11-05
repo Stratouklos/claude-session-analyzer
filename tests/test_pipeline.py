@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import uuid
 
@@ -317,24 +318,30 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         built, stamped = os.stat(out).st_mtime_ns, os.stat(stamp).st_mtime_ns
 
+        # The recipe echo, not an output mtime bump, proves a rebuild: it is free of filesystem mtime granularity.
         proc = self.make_chat(export)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertEqual(os.stat(stamp).st_mtime_ns, stamped, "unchanged export leaves export.stamp alone")
         self.assertEqual(os.stat(out).st_mtime_ns, built)
+        self.assertNotIn("extract_chat.py", proc.stdout + proc.stderr, "unchanged export does not re-extract")
 
         conv = os.path.join(export, "conversations.json")
         size = os.stat(conv).st_size
         os.utime(conv, ns=(1_000_000_000, 1_000_000_000))
         self.assertEqual(os.stat(conv).st_size, size)
-        self.assertEqual(self.make_chat(export).returncode, 0)
-        rebuilt = os.stat(out).st_mtime_ns
-        self.assertGreater(rebuilt, built, "mtime-only change re-extracts")
+        # GNU make 3.81 compares mtimes at 1s granularity; cross a second so the stamp rewrite outranks the last build.
+        time.sleep(1.1)
+        proc = self.make_chat(export)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("extract_chat.py", proc.stdout + proc.stderr, "mtime-only change re-extracts")
 
         copy = os.path.join(self.tmp, "export-copy")
         shutil.copytree(export, copy)
         os.utime(os.path.join(copy, "conversations.json"), ns=(1_000_000_000, 1_000_000_000))
-        self.assertEqual(self.make_chat(copy).returncode, 0)
-        self.assertGreater(os.stat(out).st_mtime_ns, rebuilt, "same bytes, size and mtime at a new path re-extracts")
+        time.sleep(1.1)
+        proc = self.make_chat(copy)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("extract_chat.py", proc.stdout + proc.stderr, "same bytes, size and mtime at a new path re-extracts")
 
     def test_make_chat_without_export_dir_fails(self):
         proc = self.make_chat(None)
