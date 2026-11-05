@@ -53,7 +53,12 @@ FORCE:
 $(F)/candidates_transcripts.jsonl: $(F)/_meta/corpus.stamp
 	$(PY) $(T)/extract_transcripts.py
 
-$(F)/candidates_chat.jsonl: $(F)/_meta/corpus.stamp
+# Always runs; the stamp changes only when the export did.
+$(F)/_meta/export.stamp: FORCE
+	@test -n "$(CHAT_EXPORT)" || { echo "set CHAT_EXPORT to your claude.ai export dir"; exit 1; }
+	$(PY) $(T)/stamp_export.py $(CHAT_EXPORT)
+
+$(F)/candidates_chat.jsonl: $(F)/_meta/corpus.stamp $(F)/_meta/export.stamp
 	@test -n "$(CHAT_EXPORT)" || { echo "set CHAT_EXPORT to your claude.ai export dir"; exit 1; }
 	$(PY) $(T)/extract_chat.py $(CHAT_EXPORT)
 

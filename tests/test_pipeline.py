@@ -259,6 +259,89 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(cand["preceding_output_chars"], len(reply))
         self.assertNotIn("[REDACTED", self.all_findings_text())
 
+    def test_export_stamp_changes_only_when_the_export_does(self):
+        export = self.write_export([("human", "deploy the api")])
+        stamp = os.path.join(self.findings, "_meta", "export.stamp")
+        self.run_tool("tools/stamp_export.py", export)
+        self.assertEqual(os.stat(stamp).st_mode & 0o777, 0o600)
+        os.utime(stamp, ns=(1, 1))
+        self.run_tool("tools/stamp_export.py", export)
+        self.assertEqual(os.stat(stamp).st_mtime_ns, 1, "unchanged export leaves the stamp alone")
+        self.write_export([("human", "deploy the api to production")])
+        self.run_tool("tools/stamp_export.py", export)
+        self.assertNotEqual(os.stat(stamp).st_mtime_ns, 1, "changed export rewrites the stamp")
+
+    def test_export_stamp_needs_conversations_json(self):
+        empty = os.path.join(self.tmp, "empty")
+        os.makedirs(empty)
+        proc = self.run_tool("tools/stamp_export.py", empty, check=False)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn(os.path.join(empty, "conversations.json"), proc.stderr)
+
+    def test_make_reextracts_chat_only_when_the_export_changed(self):
+        self.add_session(WORK)
+        export = self.write_export([("human", "deploy the api"), ("assistant", "ok"),
+                                    ("human", "no, that's wrong, use the staging cluster instead")])
+        out = os.path.join(self.findings, "candidates_chat.jsonl")
+        env = dict(os.environ, HOME=self.home, CSA_CONFIG=self.config, CSA_FINDINGS=self.findings)
+
+        def make():
+            proc = subprocess.run(
+                ["make", f"F={self.findings}", f"PY={sys.executable}", f"CHAT_EXPORT={export}", out],
+                cwd=REPO, env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            return os.stat(out).st_mtime_ns
+
+        built = make()
+        self.assertEqual(make(), built, "an unchanged export is not re-extracted")
+        self.write_export([("human", "deploy the api"), ("assistant", "ok"),
+                           ("human", "no, that's wrong, use the production cluster instead")])
+        self.assertGreater(make(), built, "a changed export is re-extracted")
+
+    def make_chat(self, export, *extra):
+        env = dict(os.environ, HOME=self.home, CSA_CONFIG=self.config, CSA_FINDINGS=self.findings)
+        arg = [f"CHAT_EXPORT={export}"] if export else []
+        return subprocess.run(
+            ["make", f"F={self.findings}", f"PY={sys.executable}", *arg, *extra,
+             os.path.join(self.findings, "candidates_chat.jsonl")],
+            cwd=REPO, env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+    def test_make_chat_rebuild_triggers_beyond_content_edits(self):
+        self.add_session(WORK)
+        msgs = [("human", "deploy the api"), ("assistant", "ok"),
+                ("human", "no, that's wrong, use the staging cluster instead")]
+        export = self.write_export(msgs)
+        out = os.path.join(self.findings, "candidates_chat.jsonl")
+        stamp = os.path.join(self.findings, "_meta", "export.stamp")
+        proc = self.make_chat(export)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        built, stamped = os.stat(out).st_mtime_ns, os.stat(stamp).st_mtime_ns
+
+        proc = self.make_chat(export)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(os.stat(stamp).st_mtime_ns, stamped, "unchanged export leaves export.stamp alone")
+        self.assertEqual(os.stat(out).st_mtime_ns, built)
+
+        conv = os.path.join(export, "conversations.json")
+        size = os.stat(conv).st_size
+        os.utime(conv, ns=(1_000_000_000, 1_000_000_000))
+        self.assertEqual(os.stat(conv).st_size, size)
+        self.assertEqual(self.make_chat(export).returncode, 0)
+        rebuilt = os.stat(out).st_mtime_ns
+        self.assertGreater(rebuilt, built, "mtime-only change re-extracts")
+
+        copy = os.path.join(self.tmp, "export-copy")
+        shutil.copytree(export, copy)
+        os.utime(os.path.join(copy, "conversations.json"), ns=(1_000_000_000, 1_000_000_000))
+        self.assertEqual(self.make_chat(copy).returncode, 0)
+        self.assertGreater(os.stat(out).st_mtime_ns, rebuilt, "same bytes, size and mtime at a new path re-extracts")
+
+    def test_make_chat_without_export_dir_fails(self):
+        proc = self.make_chat(None)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("CHAT_EXPORT", proc.stdout + proc.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.findings, "_meta", "export.stamp")))
+
     def test_raw_fixture_holds_a_detectable_secret(self):
         _sid, raw = self.add_session(WORK)
         with open(raw) as fh:

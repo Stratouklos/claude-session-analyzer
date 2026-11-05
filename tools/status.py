@@ -21,7 +21,7 @@ from common import FINDINGS  # noqa: E402
 # output -> (inputs, the command that rebuilds it)
 STAGES = [
     ("candidates_transcripts.jsonl", ["_meta/corpus.stamp"], "extract_transcripts.py"),
-    ("candidates_chat.jsonl", ["_meta/corpus.stamp"], "extract_chat.py <export-dir>"),
+    ("candidates_chat.jsonl", ["_meta/corpus.stamp", "_meta/export.stamp"], "extract_chat.py <export-dir>"),
     ("interrupts.jsonl", ["_meta/corpus.stamp"], "extract_interrupts.py"),
     ("artifacts_authored.jsonl", ["_meta/corpus.stamp"], "extract_artifacts.py"),
     ("code_comments.jsonl", ["_meta/corpus.stamp"], "extract_code_comments.py"),
