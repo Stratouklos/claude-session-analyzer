@@ -93,7 +93,7 @@ model read a batch of JSON from `findings/*_in/` and expect the verdicts back in
 `findings/*_out/` — the judging itself is done by whatever model you point at
 those batches, not by this repo.
 
-**Redact** — before anything reads a transcript.
+**Redact** — before anything reads a transcript or a claude.ai chat export.
 
 | Tool | Writes |
 | --- | --- |
@@ -114,6 +114,12 @@ the stamp moves only when a copy did, so `make` re-extracts only when there is
 something new. Rules: `tools/redact.toml` (the betterleaks defaults plus a few
 for shapes they miss). Validation is off, so no secret is sent anywhere to be
 checked.
+
+A claude.ai chat export is redacted the same way before it is extracted:
+`extract_chat.py` runs each message and the conversation title through the
+redactor before any clip, so a secret cut at a clip boundary cannot reach the
+judge or sit in findings. `candidates_chat.jsonl` is rebuilt when the rules or
+the export change.
 
 `judge_batches.py` scans every batch again before the first model call and
 stops the run, with nothing sent, on any finding. It caches verdicts by model,
